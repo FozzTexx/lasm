@@ -515,16 +515,7 @@ else:
   if os.path.exists(path + ".p"):
     opath, ext = os.path.splitext(args.filename)
 
-    cmd = PLIST + " " + path + ".p"
-    print cmd
-    with os.popen(cmd) as f:
-      for line in f:
-        cols = line.split()
-        if len(cols) == 5 and cols[0] == "Zx80" and cols[1] == "CODE":
-          saddr = cols[2].lstrip("0")
-          eaddr = cols[4].lstrip("0")
-    
-    cmd = P2HEX + " " + path + ".p " + opath + ".hex" + " -r '$" + saddr + "-$" + eaddr + "'"
+    cmd = P2HEX + " " + path + ".p " + opath + ".hex" + " -r 0x-0x"
     print cmd
     os.system(cmd)
   shutil.rmtree(tmpdir)
