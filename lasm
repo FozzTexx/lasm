@@ -25,6 +25,7 @@ import shutil
 
 ASSEMBLER = "asl -cpu z80"
 P2HEX = "p2hex -F Intel"
+PLIST = "plist"
 INSTR8080 = ("ACI","ADC","ADD","ADI","ANA","ANI","CALL","CC","CM","CMA","CMC",
              "CMP","CNC","CNZ","CP","CPE","CPI","CPO","CZ","DAA","DAD","DCR",
              "DCX","DI","EI","HLT","IN","INR","INX","JC","JM","JMP","JNC","JNZ",
@@ -101,7 +102,14 @@ def paramEnd(param):
       break
     i += 1
   return param[:i].rstrip()
-    
+
+def findNth(haystack, needle, n):
+  start = haystack.find(needle)
+  while start >= 0 and n > 1:
+    start = haystack.find(needle, start+len(needle))
+    n -= 1
+  return start
+
 def convertSyntax(filename):
   lines = []
   lcount = 0
@@ -182,13 +190,21 @@ def convertSyntax(filename):
         if mnem != "EQU" and mnem != "DB" and mnem != "DW" and label in INSTR8080:
           line = "\t" + line
 
-      m = re.search("^([A-Z0-9]+:)?[ \t]*\\b(" + INSTRREGEX + ")\\b[ \t]*(.*)",
+      m = re.search("^([A-Z0-9]+:?)?[ \t]*\\b(" + INSTRREGEX + ")\\b[ \t]*(.*)",
                     line, flags=re.IGNORECASE)
       if m:
+        label = m.group(1)
         mnem = m.group(2).upper()
         param = m.group(3).rstrip()
         param = paramEnd(param)
-        lbeg = m.string[:m.start(2)]
+        if label:
+          llen = len(label)
+          if label[-1] != ':':
+            label += ':'
+        else:
+          label = ""
+          llen = 0
+        lbeg = label + m.string[llen:m.start(2)]
         lend = m.string[m.start(3) + len(param):]
         param = fixOperators(param)
 
@@ -450,6 +466,17 @@ def convertSyntax(filename):
           m = re.search("\".*\\\\.*\"", param)
         if m:
           param = param.replace("\\", "\\\\")
+
+        # Need to create a second line if there's more than 20 arguments
+        if (mnem == "DB" or mnem == "DW") and param.count(",") > 19:
+          bpos = findNth(param, ",", 20)
+          param2 = param[bpos + 1:]
+          param = param[:bpos]
+          line = lbeg + mnem + "\t" + param + lend
+          lines.append(line)
+          lbeg = "\t"
+          param = param2
+          lend = ""
           
         line = lbeg + mnem + "\t" + param + lend
         
@@ -487,7 +514,17 @@ else:
   path, ext = os.path.splitext(outfile)
   if os.path.exists(path + ".p"):
     opath, ext = os.path.splitext(args.filename)
-    cmd = P2HEX + " " + path + ".p " + opath + ".hex"
+
+    cmd = PLIST + " " + path + ".p"
+    print cmd
+    with os.popen(cmd) as f:
+      for line in f:
+        cols = line.split()
+        if len(cols) == 5 and cols[0] == "Zx80" and cols[1] == "CODE":
+          saddr = cols[2].lstrip("0")
+          eaddr = cols[4].lstrip("0")
+    
+    cmd = P2HEX + " " + path + ".p " + opath + ".hex" + " -r '$" + saddr + "-$" + eaddr + "'"
     print cmd
     os.system(cmd)
   shutil.rmtree(tmpdir)
