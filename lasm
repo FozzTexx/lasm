@@ -109,7 +109,7 @@ def convertSyntax(filename):
   ZEOF = False
   path, sname = os.path.split(filename)
   orig, ext = os.path.splitext(sname)
-  outfile = os.path.join(tmpdir, orig + ".s")
+  outfile = os.path.join(tmpdir, orig + ext)
 
   if filename in processed:
     return outfile
@@ -461,7 +461,7 @@ def convertSyntax(filename):
       if ZEOF:
         break
 
-  outfile = os.path.join(tmpdir, orig + ".s")
+  outfile = os.path.join(tmpdir, orig + ext)
   f = open(outfile, "w")
   for line in lines:
     f.write(line)
