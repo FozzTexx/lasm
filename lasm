@@ -1,0 +1,493 @@
+#!/usr/bin/env python
+#
+# Copyright 2016 by Chris Osborn <fozztexx@fozztexx.com>
+#
+# Converts LASM 8080 assembly into Z80 assembly compatible with AS
+# macroassembler at http://john.ccac.rwth-aachen.de:8000/as/
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+import argparse
+import re
+import os
+import sys
+import tempfile
+import shutil
+
+ASSEMBLER = "asl -cpu z80"
+P2HEX = "p2hex -F Intel"
+INSTR8080 = ("ACI","ADC","ADD","ADI","ANA","ANI","CALL","CC","CM","CMA","CMC",
+             "CMP","CNC","CNZ","CP","CPE","CPI","CPO","CZ","DAA","DAD","DCR",
+             "DCX","DI","EI","HLT","IN","INR","INX","JC","JM","JMP","JNC","JNZ",
+             "JP","JPE","JPO","JZ","LDA","LDAX","LHLD","LXI","MOV","MVI","NOP",
+             "ORA","ORI","OUT","PCHL","POP","PUSH","RAL","RAR","RC","RET","RLC",
+             "RM","RNC","RNZ","RP","RPE","RPO","RRC","RST","RZ","SBB","SBI",
+             "SHLD","SPHL","STA","STAX","STC","SUB","SUI","XCHG","XRA","XRI","XTHL",
+             # Directives that also need cleaning
+             "DB", "DW")
+INSTRREGEX = ""
+
+processed = []
+
+parser = argparse.ArgumentParser()
+parser.add_argument("filename", help="file to assemble")
+parser.add_argument("--output", help="file to output")
+args = parser.parse_args()
+
+def fixBoolean(param):
+  if re.search("\\b(OR|AND|NOT)\\b", param, flags=re.IGNORECASE):
+    param = re.sub("\\bOR\\b", "||", param, flags=re.IGNORECASE)
+    param = re.sub("\\bAND\\b", "&&", param, flags=re.IGNORECASE)
+    param = re.sub("\\bNOT\\b", "~~", param, flags=re.IGNORECASE)
+  return param
+
+def fixOperators(param):
+  istr = False
+  plen = len(param)
+  last = 0
+  i = 0
+  newp = ""
+  while i < plen:
+    c = param[i]
+    if c == '\'':
+      istr = not istr
+      if istr:
+        if i - last:
+          part = param[last:i]
+          if re.search("\\b(MOD)\\b", part, flags=re.IGNORECASE):
+            part = re.sub("\\MOD\\b", "#", part, flags=re.IGNORECASE)
+          newp += part
+      elif i - last:
+        newp += param[last:i]
+      last = i
+    i += 1
+  if i - last:
+    part = param[last:i]
+    if re.search("\\b(MOD)\\b", part, flags=re.IGNORECASE):
+      part = re.sub("\\MOD\\b", "#", part, flags=re.IGNORECASE)
+    newp += part
+  if param != newp:
+    sys.stderr.write("NEWP " + newp + "\n")
+  return newp
+  
+def fixRegisters(param):
+  regs = param.upper().split(",")
+
+  if regs[0] == "M":
+    regs[0] = "(hl)"
+  if len(regs) > 1 and regs[1] == "M":
+    regs[1] = "(hl)"
+  return ",".join(regs)
+
+# FIXME - how does LASM put a single quote into a string?
+def paramEnd(param):
+  istr = False
+  plen = len(param)
+  i = 0
+  while i < plen:
+    c = param[i]
+    if c == '\'':
+      istr = not istr
+    if not istr and c == ';':
+      break
+    i += 1
+  return param[:i].rstrip()
+    
+def convertSyntax(filename):
+  lines = []
+  lcount = 0
+#  ifcount = 0
+  ZEOF = False
+  path, sname = os.path.split(filename)
+  orig, ext = os.path.splitext(sname)
+  outfile = os.path.join(tmpdir, orig + ".s")
+
+  if filename in processed:
+    return outfile
+  
+  with open(filename) as f:
+    for line in f:
+      lcount += 1
+      line = line.rstrip()
+      zpos = line.find('\032')
+      if zpos >= 0:
+        ZEOF = True
+        line = line[:zpos]
+        
+      m = re.search("^([A-Z0-9]+)[ \t]+(EQU|SET)[ \t]+([^;]+)", line, flags=re.IGNORECASE)
+      if m:
+        label = m.group(1)
+        mnem = m.group(2).upper()
+        param = fixBoolean(m.group(3))
+        if label == "FALSE" or label == "TRUE":
+          label = ";" + label
+
+        if mnem == "SET":
+          mnem = ":="
+
+        line = label + m.string[m.end(1):m.start(2)] \
+            + mnem + m.string[m.end(2):m.start(3)] \
+            + param + m.string[m.end(3):]
+
+      m = re.search("^[ \t]*(IF)[ \t]+([^;]+)", line, flags=re.IGNORECASE)
+      if m:
+        mnem = m.group(1)
+        param = fixBoolean(m.group(2))
+        line = "\t" + mnem + m.string[m.end(1):m.start(2)] \
+            + param + m.string[m.end(2):]
+        #ifcount += 1
+        
+      m = re.search("^[ \t]*(ENDIF)([ \t;].*)?$", line, flags=re.IGNORECASE)
+      if m:
+        line = "\t" + m.string[m.start(1):]
+        #ifcount -= 1
+
+      # m = re.search("^[ \t]*(END)\\b", line, flags=re.IGNORECASE)
+      # if m:
+      #   if ifcount:
+      #     lines.append(";##### BAD END " + orig + " " + str(lcount))
+      #     #line = ";" + line
+        
+      m = re.search("^[ \t]*(LINK|INCLUDE)[ \t]+([^ \t;]+)", line, flags=re.IGNORECASE)
+      if m:
+        mnem = m.group(1).upper()
+        incfile = m.group(2).lower()
+        incl, iext = os.path.splitext(incfile)
+        incl = os.path.join(path, incl)
+        
+        if not iext:
+          iext = ext
+        converted = convertSyntax(incl + iext)
+
+        line = "\tinclude\t" + converted
+#        if mnem == "LINK":
+#          lines.append(line)
+#          line = "\tEND"
+
+      # FIXME - deal with RST isntruction. Numbers are different on
+      # 8080 vs Z80, and numbers could be macros
+      m = re.search("^([A-Z0-9]+)[ \t]+([A-Z0-9]+)", line, flags=re.IGNORECASE)
+      if m:
+        label = m.group(1).upper()
+        mnem = m.group(2).upper()
+        if mnem != "EQU" and mnem != "DB" and mnem != "DW" and label in INSTR8080:
+          line = "\t" + line
+
+      m = re.search("^([A-Z0-9]+:)?[ \t]*\\b(" + INSTRREGEX + ")\\b[ \t]*(.*)",
+                    line, flags=re.IGNORECASE)
+      if m:
+        mnem = m.group(2).upper()
+        param = m.group(3).rstrip()
+        param = paramEnd(param)
+        lbeg = m.string[:m.start(2)]
+        lend = m.string[m.start(3) + len(param):]
+        param = fixOperators(param)
+
+        if mnem == "JMP":
+          mnem = "jp"
+        elif mnem == "JNZ":
+          mnem = "jp"
+          param = "nz," + param
+        elif mnem == "JZ":
+          mnem = "jp"
+          param = "z," + param
+        elif mnem == "JNC":
+          mnem = "jp"
+          param = "nc," + param
+        elif mnem == "JC":
+          mnem = "jp"
+          param = "c," + param
+        elif mnem == "JPO":
+          mnem = "jp"
+          param = "po," + param
+        elif mnem == "JPE":
+          mnem = "jp"
+          param = "pe," + param
+        elif mnem == "JP":
+          param = "p," + param
+        elif mnem == "JM":
+          mnem = "jp"
+          param = "m," + param
+        elif mnem == "PCHL":
+          mnem = "jp"
+          param = "(hl)"
+        elif mnem == "MVI" or mnem == "MOV":
+          mnem = "ld"
+          param = fixRegisters(param)
+        elif mnem == "ADD":
+          param = "a," + fixRegisters(param)
+        elif mnem == "ADI":
+          mnem = "add"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+          param = "a," + param
+        elif mnem == "ADC":
+          param = "a," + fixRegisters(param)
+        elif mnem == "ACI":
+          mnem = "adc"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+          param = "a," + param
+        elif mnem == "SUB":
+          param = "a," + fixRegisters(param)
+        elif mnem == "SUI":
+          mnem = "sub"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+          param = "a," + param
+        elif mnem == "SBB":
+          mnem = "sbc"
+          param = "a," + fixRegisters(param)
+        elif mnem == "SBI":
+          mnem = "sbc"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+          param = "a," + param
+        elif mnem == "INR":
+          mnem = "inc"
+          param = fixRegisters(param)
+        elif mnem == "DCR":
+          mnem = "dec"
+          param = fixRegisters(param)
+        elif mnem == "INX":
+          mnem = "inc"
+          reg = param[0].upper()
+          if reg == "B":
+            reg = "bc"
+          elif reg == "D":
+            reg = "de"
+          elif reg == "H":
+            reg = "hl"
+          param = reg + param[1:]
+        elif mnem == "DCX":
+          mnem = "dec"
+          reg = param[0].upper()
+          if reg == "B":
+            reg = "bc"
+          elif reg == "D":
+            reg = "de"
+          elif reg == "H":
+            reg = "hl"
+          param = reg + param[1:]
+        elif mnem == "STA":
+          mnem = "ld"
+          param = "(" + param + "),a"
+        elif mnem == "STAX":
+          mnem = "ld"
+          param = param.upper()
+          if param == "B":
+            param = "(bc),a"
+          elif param == "D":
+            param = "(de),a"
+        elif mnem == "LXI":
+          mnem = "ld"
+          reg = param[0].upper()
+          if reg == "B":
+            reg = "bc"
+          elif reg == "D":
+            reg = "de"
+          elif reg == "H":
+            reg = "hl"
+          param = reg + param[1:]
+        elif mnem == "DAD":
+          mnem = "add"
+          reg = param[0].upper()
+          if reg == "B":
+            reg = "bc"
+          elif reg == "D":
+            reg = "de"
+          elif reg == "H":
+            reg = "hl"
+          param = "hl," + reg + param[1:]
+        elif mnem == "SHLD":
+          mnem = "ld"
+          param = "(" + param + "),hl"
+        elif mnem == "LHLD":
+          mnem = "ld"
+          param = "hl,(" + param + ")"
+        elif mnem == "SPHL":
+          mnem = "ld"
+          param = "sp,hl"
+        elif mnem == "ORA":
+          mnem = "or"
+          param = fixRegisters(param)
+        elif mnem == "ORI":
+          mnem = "or"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+        elif mnem == "ANA":
+          mnem = "and"
+          param = fixRegisters(param)
+        elif mnem == "ANI":
+          mnem = "and"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+        elif mnem == "XRA":
+          mnem = "xor"
+          param = fixRegisters(param)
+        elif mnem == "XRI":
+          mnem = "xor"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+        elif mnem == "CMP":
+          mnem = "cp"
+          param = fixRegisters(param)
+        elif mnem == "CPI":
+          mnem = "cp"
+          if re.match("\(.+\)", param):
+            param = param[1:-1]
+        elif mnem == "PUSH" or mnem == "POP":
+          reg = param.upper()
+          if reg == "B":
+            param = "bc"
+          elif reg == "D":
+            param = "de"
+          elif reg == "H":
+            param = "hl"
+          elif reg == "PSW":
+            param = "af"
+        elif mnem == "LDA":
+          mnem = "ld"
+          param = "a,(" + param + ")"
+        elif mnem == "LDAX":
+          mnem = "ld"
+          reg = param.upper()
+          if reg == "B":
+            param = "a,(bc)"
+          elif reg == "D":
+            param = "a,(de)"
+        elif mnem == "RNZ":
+          mnem = "ret"
+          param = "nz"
+        elif mnem == "RZ":
+          mnem = "ret"
+          param = "z"
+        elif mnem == "RNC":
+          mnem = "ret"
+          param = "nc"
+        elif mnem == "RC":
+          mnem = "ret"
+          param = "c"
+        elif mnem == "RPO":
+          mnem = "ret"
+          param = "po"
+        elif mnem == "RPE":
+          mnem = "ret"
+          param = "pe"
+        elif mnem == "RP":
+          mnem = "ret"
+          param = "p"
+        elif mnem == "RM":
+          mnem = "ret"
+          param = "m"
+        elif mnem == "CNZ":
+          mnem = "call"
+          param = "nz," + param
+        elif mnem == "CZ":
+          mnem = "call"
+          param = "z," + param
+        elif mnem == "CNC":
+          mnem = "call"
+          param = "nc," + param
+        elif mnem == "CC":
+          mnem = "call"
+          param = "c," + param
+        elif mnem == "CPO":
+          mnem = "call"
+          param = "po," + param
+        elif mnem == "CPE":
+          mnem = "call"
+          param = "pe," + param
+        elif mnem == "CP":
+          mnem = "call"
+          param = "p," + param
+        elif mnem == "CM":
+          mnem = "call"
+          param = "m," + param
+        elif mnem == "XCHG":
+          mnem = "ex"
+          param = "de,hl"
+        elif mnem == "XTHL":
+          mnem = "ex"
+          param = "(sp),hl"
+        elif mnem == "CMA":
+          mnem = "cpl"
+        elif mnem == "STC":
+          mnem = "scf"
+        elif mnem == "CMC":
+          mnem = "ccf"
+        elif mnem == "RLC":
+          mnem = "rlca"
+        elif mnem == "RRC":
+          mnem = "rrca"
+        elif mnem == "RAL":
+          mnem = "rla"
+        elif mnem == "RAR":
+          mnem = "rra"
+        elif mnem == "IN":
+          param = "a,(" + param + ")"
+        elif mnem == "OUT":
+          param = "(" + param + "),a"
+        elif mnem == "DB":
+          while True:
+            m = re.search("'([^'][^']+)'", param)
+            if not m:
+              break
+            pstr = m.string[m.start(1):m.end(1)]
+            param = m.string[:m.start(1)-1] + "\"" + pstr + "\"" + m.string[m.end(1)+1:]
+
+        m = re.search("'.*\\\\.*'", param)
+        if not m:
+          m = re.search("\".*\\\\.*\"", param)
+        if m:
+          param = param.replace("\\", "\\\\")
+          
+        line = lbeg + mnem + "\t" + param + lend
+        
+      m = re.search("^(.printx)", line, flags=re.IGNORECASE)
+      if m:
+        line = "\tmessage \"" + m.string[m.end(1):] + "\""
+
+      lines.append(line)
+      if ZEOF:
+        break
+
+  outfile = os.path.join(tmpdir, orig + ".s")
+  f = open(outfile, "w")
+  for line in lines:
+    f.write(line)
+    f.write("\n")
+
+  processed.append(filename)
+  
+  return outfile
+
+INSTRREGEX = INSTR8080[0]
+for instr in INSTR8080[1:]:
+  INSTRREGEX += "|" + instr
+  
+if not os.path.exists(args.filename):
+  print args.filename + " does not exist"
+else:
+  tmpdir = tempfile.mkdtemp()
+  outfile = convertSyntax(args.filename)
+
+  cmd = ASSEMBLER + " " + outfile
+  print cmd
+  os.system(cmd)
+  path, ext = os.path.splitext(outfile)
+  if os.path.exists(path + ".p"):
+    opath, ext = os.path.splitext(args.filename)
+    cmd = P2HEX + " " + path + ".p " + opath + ".hex"
+    print cmd
+    os.system(cmd)
+  shutil.rmtree(tmpdir)
