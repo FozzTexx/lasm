@@ -17,5 +17,7 @@ stop erroring out when encountering an END inside of an IF/ENDIF. Once
 I did that the output was identical to what I get from LASM running on
 CP/M.
 
+http://www.insentricity.com/a.cl/259
+
 Chris Osborn <fozztexx@fozztexx.com>
 http://insentricity.com
