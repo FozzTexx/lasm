@@ -82,13 +82,14 @@ def fixOperators(param):
   return newp
   
 def fixRegisters(param):
+  pcopy = param.split(",")
   regs = param.upper().split(",")
 
   if regs[0] == "M":
-    regs[0] = "(hl)"
+    pcopy[0] = "(hl)"
   if len(regs) > 1 and regs[1] == "M":
-    regs[1] = "(hl)"
-  return ",".join(regs)
+    pcopy[1] = "(hl)"
+  return ",".join(pcopy)
 
 def fixStrings(param):
   pcopy = list(param)
@@ -267,6 +268,9 @@ def convertSyntax(filename):
         elif mnem == "MVI" or mnem == "MOV":
           mnem = "ld"
           param = fixRegisters(param)
+          if param[1] == ',' and param[2] == '(' and param[-1] == ')' \
+                and param[2:].upper() != "(HL)":
+            param = param[:2] + param[3:-1]
         elif mnem == "ADD":
           param = "a," + fixRegisters(param)
         elif mnem == "ADI":
@@ -342,6 +346,11 @@ def convertSyntax(filename):
           elif reg == "H":
             reg = "hl"
           param = reg + param[1:]
+          if param[2] == ',' and param[3] == '(' and param[-1] == ')':
+            param = param[:3] + param[4:-1]
+          if len(param) == 7 and param[2] == ',' \
+                and param[3] == '\'' and param[6] == '\'':
+            param = param[:4] + param[5] + param[4] + param[6:]
         elif mnem == "DAD":
           mnem = "add"
           reg = param[0].upper()
@@ -502,6 +511,8 @@ def convertSyntax(filename):
           lend = ""
           
         line = lbeg + mnem + "\t" + param + lend
+        if line[-1] == '\\':
+          line += " "
         
       m = re.search("^(.printx)", line, flags=re.IGNORECASE)
       if m:
@@ -534,6 +545,8 @@ else:
   cmd = ASSEMBLER + " " + outfile
   print cmd
   os.system(cmd)
+  # FIXME - exit with same exit code
+  
   path, ext = os.path.splitext(outfile)
   opath, ext = os.path.splitext(args.filename)
 
