@@ -179,6 +179,7 @@ def convertSyntax(filename):
         if mnem == "SET":
           mnem = ":="
 
+        param = fixStrings(param)
         line = label + m.string[m.end(1):m.start(2)] \
             + mnem + m.string[m.end(2):m.start(3)] \
             + param + m.string[m.end(3):]
