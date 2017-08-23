@@ -526,9 +526,9 @@ def convertSyntax(filename):
       m = re.search("^(.printx)", line, flags=re.IGNORECASE)
       if m:
         line = "\tmessage \"" + m.string[m.end(1):] + "\""
-      m = re.search("^[ \t]*(title)", line, flags=re.IGNORECASE)
-      if m:
-        line = "\tmessage \"" + m.string[m.end(1):] + "\""
+#      m = re.search("^[ \t]*(title)", line, flags=re.IGNORECASE)
+#      if m:
+#        line = "\tmessage \"" + m.string[m.end(1):] + "\""
 
       lines.append(line)
       if ZEOF:
@@ -572,5 +572,5 @@ else:
     print "Copying listing output"
     shutil.copy2(path + ".lst", opath + ".lst")
       
-#  shutil.rmtree(tmpdir)
+  shutil.rmtree(tmpdir)
   sys.exit(result)
