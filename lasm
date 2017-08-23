@@ -53,6 +53,15 @@ def fixBoolean(param):
     param = re.sub("\\bNOT\\b", "~~", param, flags=re.IGNORECASE)
   return param
 
+def replaceOperators(param):
+  if re.search("\\b(OR|AND|NOT|MOD|SHR)\\b", param, flags=re.IGNORECASE):
+    param = re.sub("\\bOR\\b", "|", param, flags=re.IGNORECASE)
+    param = re.sub("\\bAND\\b", "&", param, flags=re.IGNORECASE)
+    param = re.sub("\\bNOT\\b", "~", param, flags=re.IGNORECASE)
+    param = re.sub("\\bMOD\\b", "#", param, flags=re.IGNORECASE)
+    param = re.sub("\\bSHR\\b", ">>", param, flags=re.IGNORECASE)
+  return param
+  
 def fixOperators(param):
   istr = False
   plen = len(param)
@@ -65,19 +74,13 @@ def fixOperators(param):
       istr = not istr
       if istr:
         if i - last:
-          part = param[last:i]
-          if re.search("\\b(MOD)\\b", part, flags=re.IGNORECASE):
-            part = re.sub("\\MOD\\b", "#", part, flags=re.IGNORECASE)
-          newp += part
+          newp += replaceOperators(param[last:i])
       elif i - last:
         newp += param[last:i]
       last = i
     i += 1
   if i - last:
-    part = param[last:i]
-    if re.search("\\b(MOD)\\b", part, flags=re.IGNORECASE):
-      part = re.sub("\\MOD\\b", "#", part, flags=re.IGNORECASE)
-    newp += part
+    newp += replaceOperators(param[last:i])
   if param != newp:
     sys.stderr.write("NEWP " + newp + "\n")
   return newp
@@ -281,21 +284,21 @@ def convertSyntax(filename):
             param = "a," + fixRegisters(param)
           elif mnem == "ADI":
             mnem = "add"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
             param = "a," + param
           elif mnem == "ADC":
             param = "a," + fixRegisters(param)
           elif mnem == "ACI":
             mnem = "adc"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
             param = "a," + param
           elif mnem == "SUB":
             param = "a," + fixRegisters(param)
           elif mnem == "SUI":
             mnem = "sub"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
             param = "a," + param
           elif mnem == "SBB":
@@ -303,7 +306,7 @@ def convertSyntax(filename):
             param = "a," + fixRegisters(param)
           elif mnem == "SBI":
             mnem = "sbc"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
             param = "a," + param
           elif mnem == "INR":
@@ -381,28 +384,28 @@ def convertSyntax(filename):
             param = fixRegisters(param)
           elif mnem == "ORI":
             mnem = "or"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
           elif mnem == "ANA":
             mnem = "and"
             param = fixRegisters(param)
           elif mnem == "ANI":
             mnem = "and"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
           elif mnem == "XRA":
             mnem = "xor"
             param = fixRegisters(param)
           elif mnem == "XRI":
             mnem = "xor"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
           elif mnem == "CMP":
             mnem = "cp"
             param = fixRegisters(param)
           elif mnem == "CPI":
             mnem = "cp"
-            if re.match("\(.+\)", param):
+            if re.match("^\(.+\)$", param):
               param = param[1:-1]
           elif mnem == "PUSH" or mnem == "POP":
             reg = param.upper()
@@ -568,5 +571,5 @@ else:
     print "Copying listing output"
     shutil.copy2(path + ".lst", opath + ".lst")
       
-  shutil.rmtree(tmpdir)
+#  shutil.rmtree(tmpdir)
   sys.exit(result)
