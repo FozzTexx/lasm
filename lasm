@@ -35,6 +35,7 @@ INSTR8080 = ("ACI","ADC","ADD","ADI","ANA","ANI","CALL","CC","CM","CMA","CMC",
              "SHLD","SPHL","STA","STAX","STC","SUB","SUI","XCHG","XRA","XRI","XTHL",
              # Directives that also need cleaning
              "DB", "DW")
+TASM = ("EQU","CSEG","DSEG","ORG","TEXT","DB","DW","BLOCK","END")
 INSTRREGEX = ""
 
 processed = []
@@ -44,6 +45,7 @@ parser.add_argument("filename", help="file to assemble")
 parser.add_argument("--output", help="file to output")
 parser.add_argument("--cpu", default="z80", help="CPU type: 8080 or Z80 (default)")
 parser.add_argument("--listing", action="store_true", help="Produce assembler listing in .lst")
+parser.add_argument("--tasm", action="store_true", help="Use TASM compatible mnemonics")
 args = parser.parse_args()
 
 def fixBoolean(param):
@@ -60,6 +62,8 @@ def replaceOperators(param):
     param = re.sub("\\bNOT\\b", "~", param, flags=re.IGNORECASE)
     param = re.sub("\\bMOD\\b", "#", param, flags=re.IGNORECASE)
     param = re.sub("\\bSHR\\b", ">>", param, flags=re.IGNORECASE)
+  if args.tasm and re.search("%", param, flags=re.IGNORECASE):
+    param = re.sub("%", "#", param, flags=re.IGNORECASE)
   return param
   
 def fixOperators(param):
@@ -70,8 +74,11 @@ def fixOperators(param):
   newp = ""
   while i < plen:
     c = param[i]
-    if c == '\'':
-      istr = not istr
+    if (not istr and c == '"' or c == '\'') or (istr and c == istr):
+      if not istr:
+        istr = c
+      else:
+        istr = False
       if istr:
         if i - last:
           newp += replaceOperators(param[last:i])
@@ -83,16 +90,20 @@ def fixOperators(param):
     newp += replaceOperators(param[last:i])
   if param != newp:
     sys.stderr.write("NEWP " + newp + "\n")
+    sys.stderr.write("OLDP " + param + "\n")
   return newp
   
 def fixRegisters(param):
   pcopy = param.split(",")
   regs = param.upper().split(",")
 
+  regs[0] = regs[0].strip()
   if regs[0] == "M":
     pcopy[0] = "(hl)"
-  if len(regs) > 1 and regs[1] == "M":
-    pcopy[1] = "(hl)"
+  if len(regs) > 1:
+    regs[1] = regs[1].strip()
+    if regs[1] == "M":
+      pcopy[1] = "(hl)"
   return ",".join(pcopy)
 
 def fixStrings(param):
@@ -168,7 +179,7 @@ def convertSyntax(filename):
         ZEOF = True
         line = line[:zpos]
         
-      m = re.search("^([A-Z0-9]+)[ \t]+(EQU|SET)[ \t]+([^;]+)", line, flags=re.IGNORECASE)
+      m = re.search("^([A-Z0-9_]+)[ \t]+(EQU|SET)[ \t]+([^;]+)", line, flags=re.IGNORECASE)
       if m:
         label = m.group(1)
         mnem = m.group(2).upper()
@@ -221,15 +232,18 @@ def convertSyntax(filename):
 
       # FIXME - deal with RST isntruction. Numbers are different on
       # 8080 vs Z80, and numbers could be macros
-      m = re.search("^([A-Z0-9]+)[ \t]+([A-Z0-9]+)", line, flags=re.IGNORECASE)
+      m = re.search("^([A-Z0-9_]+)[ \t]+([A-Z0-9]+)", line, flags=re.IGNORECASE)
       if m:
         label = m.group(1).upper()
         mnem = m.group(2).upper()
         if mnem != "EQU" and mnem != "DB" and mnem != "DW" and label in INSTR8080:
           line = "\t" + line
 
-      m = re.search("^([A-Z0-9]+:?)?[ \t]*\\b(" + INSTRREGEX + ")\\b[ \t]*(.*)",
+      m = re.search("^([A-Z0-9_]+:?)?[ \t]*\\b(" + INSTRREGEX + ")\\b[ \t]*(.*)",
                     line, flags=re.IGNORECASE)
+      if not m and args.tasm:
+        m = re.search("^([A-Z0-9_]+:?)?[ \t]*(" + TASMREGEX + ")\\b[ \t]*(.*)",
+                      line, flags=re.IGNORECASE)        
       if m:
         label = m.group(1)
         mnem = m.group(2).upper()
@@ -246,8 +260,28 @@ def convertSyntax(filename):
         lend = m.string[m.start(3) + len(param):]
         param = fixOperators(param)
 
-        if args.cpu != "8080":
-          if mnem == "JMP":
+        if mnem == ".EQU":
+          mnem = "equ"
+        elif mnem == ".CSEG":
+          mnem = ";.cseg"
+        elif mnem == ".DSEG":
+          mnem = ";.dseg"
+        elif mnem == ".ORG":
+          mnem = "org"
+        elif mnem == ".TEXT":
+          mnem = "db"
+        elif mnem == ".DB":
+          mnem = "db"
+        elif mnem == ".DW":
+          mnem = "dw"
+        elif mnem == ".BLOCK":
+          mnem = "ds"
+        elif mnem == ".END":
+          mnem = "end"
+        elif args.cpu != "8080":
+          if mnem == "HLT":
+            mnem = "HALT"
+          elif mnem == "JMP":
             mnem = "jp"
           elif mnem == "JNZ":
             mnem = "jp"
@@ -547,6 +581,10 @@ def convertSyntax(filename):
 INSTRREGEX = INSTR8080[0]
 for instr in INSTR8080[1:]:
   INSTRREGEX += "|" + instr
+if args.tasm:
+  TASMREGEX = "\\." + TASM[0]
+  for instr in TASM[1:]:
+    TASMREGEX += "|\\." + instr
   
 if not os.path.exists(args.filename):
   print args.filename + " does not exist"
