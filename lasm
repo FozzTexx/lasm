@@ -26,16 +26,23 @@ import shutil
 ASSEMBLER = "asl -L -cpu "
 P2HEX = "p2hex -F Intel"
 PLIST = "plist"
-INSTR8080 = ("ACI","ADC","ADD","ADI","ANA","ANI","CALL","CC","CM","CMA","CMC",
-             "CMP","CNC","CNZ","CP","CPE","CPI","CPO","CZ","DAA","DAD","DCR",
-             "DCX","DI","EI","HLT","IN","INR","INX","JC","JM","JMP","JNC","JNZ",
-             "JP","JPE","JPO","JZ","LDA","LDAX","LHLD","LXI","MOV","MVI","NOP",
-             "ORA","ORI","OUT","PCHL","POP","PUSH","RAL","RAR","RC","RET","RLC",
-             "RM","RNC","RNZ","RP","RPE","RPO","RRC","RST","RZ","SBB","SBI",
-             "SHLD","SPHL","STA","STAX","STC","SUB","SUI","XCHG","XRA","XRI","XTHL",
+INSTR8080 = {"ACI":"adc", "ADC":None, "ADD":None, "ADI":"add", "ANA":"and", "ANI":"and",
+             "CALL":None, "CC":"call", "CM":"call", "CMA":"cpl", "CMC":"ccf", "CMP":"cp",
+             "CNC":"call", "CNZ":"call", "CP":"call", "CPE":"call", "CPI":"cp", "CPO":"call",
+             "CZ":"call", "DAA":None, "DAD":"add", "DCR":"dec", "DCX":"dec", "DI":None,
+             "EI":None, "HLT":"halt", "IN":None, "INR":"inc", "INX":"inc", "JC":"jp",
+             "JM":"jp", "JMP":"jp", "JNC":"jp", "JNZ":"jp", "JP":None, "JPE":"jp", "JPO":"jp",
+             "JZ":"jp", "LDA":"ld", "LDAX":"ld", "LHLD":"ld", "LXI":"ld", "MOV":"ld",
+             "MVI":"ld" ,"NOP":None, "ORA":"or", "ORI":"or", "OUT":None, "PCHL":"jp",
+             "POP":None, "PUSH":None, "RAL":"rla", "RAR":"rra", "RC":"ret", "RET":None,
+             "RLC":"rlca", "RM":"ret", "RNC":"ret", "RNZ":"ret", "RP":"ret", "RPE":"ret",
+             "RPO":"ret", "RRC":"rrca", "RST":None, "RZ":"ret", "SBB":"sbc", "SBI":"sbc",
+             "SHLD":"ld", "SPHL":"ld", "STA":"ld", "STAX":"ld", "STC":"scf", "SUB":None,
+             "SUI":"sub", "XCHG":"ex", "XRA":"xor", "XRI":"xor", "XTHL":"ex",
              # Directives that also need cleaning
-             "DB", "DW")
-TASM = ("EQU","CSEG","DSEG","ORG","TEXT","DB","DW","BLOCK","END")
+             "DB":None, "DW":None}
+TASM = {".EQU":"equ", ".CSEG":";.cseg", ".DSEG":";.dseg", ".ORG":"org", ".TEXT":"db",
+        ".DB":"db", ".DW":"dw", ".BLOCK":"ds", ".END":"end"}
 INSTRREGEX = ""
 
 processed = []
@@ -260,98 +267,50 @@ def convertSyntax(filename):
         lend = m.string[m.start(3) + len(param):]
         param = fixOperators(param)
 
-        if mnem == ".EQU":
-          mnem = "equ"
-        elif mnem == ".CSEG":
-          mnem = ";.cseg"
-        elif mnem == ".DSEG":
-          mnem = ";.dseg"
-        elif mnem == ".ORG":
-          mnem = "org"
-        elif mnem == ".TEXT":
-          mnem = "db"
-        elif mnem == ".DB":
-          mnem = "db"
-        elif mnem == ".DW":
-          mnem = "dw"
-        elif mnem == ".BLOCK":
-          mnem = "ds"
-        elif mnem == ".END":
-          mnem = "end"
-        elif args.cpu != "8080":
-          if mnem == "HLT":
-            mnem = "HALT"
-          elif mnem == "JMP":
-            mnem = "jp"
-          elif mnem == "JNZ":
-            mnem = "jp"
+        omnem = mnem
+        new = None
+        if args.tasm and mnem in TASM:
+          new = TASM[mnem]
+        elif mnem in INSTR8080:
+          new = INSTR8080[mnem]
+        if new:
+          mnem = new
+
+        if args.cpu != "8080":
+          if omnem == "JNZ":
             param = "nz," + param
-          elif mnem == "JZ":
-            mnem = "jp"
+          elif omnem == "JZ":
             param = "z," + param
-          elif mnem == "JNC":
-            mnem = "jp"
+          elif omnem == "JNC":
             param = "nc," + param
-          elif mnem == "JC":
-            mnem = "jp"
+          elif omnem == "JC":
             param = "c," + param
-          elif mnem == "JPO":
-            mnem = "jp"
+          elif omnem == "JPO":
             param = "po," + param
-          elif mnem == "JPE":
-            mnem = "jp"
+          elif omnem == "JPE":
             param = "pe," + param
-          elif mnem == "JP":
+          elif omnem == "JP":
             param = "p," + param
-          elif mnem == "JM":
-            mnem = "jp"
+          elif omnem == "JM":
             param = "m," + param
-          elif mnem == "PCHL":
-            mnem = "jp"
+          elif omnem == "PCHL":
             param = "(hl)"
-          elif mnem == "MVI" or mnem == "MOV":
-            mnem = "ld"
+          elif omnem == "MVI" or omnem == "MOV":
             param = fixRegisters(param)
             if param[1] == ',' and param[2] == '(' and param[-1] == ')' \
                   and param[2:].upper() != "(HL)":
               param = param[:2] + param[3:-1]
-          elif mnem == "ADD":
+          elif omnem == "ADD" or omnem == "ADC" or omnem == "SUB" or omnem == "SBB":
             param = "a," + fixRegisters(param)
-          elif mnem == "ADI":
-            mnem = "add"
+          elif omnem == "ADI" or omnem == "ACI" or omnem == "SUI" or omnem == "SBI" \
+                or omnem == "ORI" or omnem == "ANI" or omnem == "XRI" or omnem == "CPI":
             if re.match("^\(.+\)$", param):
               param = param[1:-1]
             param = "a," + param
-          elif mnem == "ADC":
-            param = "a," + fixRegisters(param)
-          elif mnem == "ACI":
-            mnem = "adc"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-            param = "a," + param
-          elif mnem == "SUB":
-            param = "a," + fixRegisters(param)
-          elif mnem == "SUI":
-            mnem = "sub"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-            param = "a," + param
-          elif mnem == "SBB":
-            mnem = "sbc"
-            param = "a," + fixRegisters(param)
-          elif mnem == "SBI":
-            mnem = "sbc"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-            param = "a," + param
-          elif mnem == "INR":
-            mnem = "inc"
+          elif omnem == "INR" or omnem == "DCR" or omnem == "ORA" or omnem == "ANA" \
+                or omnem == "XRA" or omnem == "CMP":
             param = fixRegisters(param)
-          elif mnem == "DCR":
-            mnem = "dec"
-            param = fixRegisters(param)
-          elif mnem == "INX":
-            mnem = "inc"
+          elif omnem == "INX" or omnem == "DCX" or omnem == "DAD" or omnem == "LXI":
             reg = param[0].upper()
             if reg == "B":
               reg = "bc"
@@ -359,90 +318,31 @@ def convertSyntax(filename):
               reg = "de"
             elif reg == "H":
               reg = "hl"
-            param = reg + param[1:]
-          elif mnem == "DCX":
-            mnem = "dec"
-            reg = param[0].upper()
-            if reg == "B":
-              reg = "bc"
-            elif reg == "D":
-              reg = "de"
-            elif reg == "H":
-              reg = "hl"
-            param = reg + param[1:]
-          elif mnem == "STA":
-            mnem = "ld"
+            if omnem == "DAD":
+              param = "hl," + reg + param[1:]
+            else:
+              param = reg + param[1:]
+            if omnem == "LXI":
+              if param[2] == ',' and param[3] == '(' and param[-1] == ')':
+                param = param[:3] + param[4:-1]
+              if len(param) == 7 and param[2] == ',' \
+                    and param[3] == '\'' and param[6] == '\'':
+                param = param[:4] + param[5] + param[4] + param[6:]
+          elif omnem == "STA" or omnem == "OUT":
             param = "(" + param + "),a"
-          elif mnem == "STAX":
-            mnem = "ld"
+          elif omnem == "STAX":
             param = param.upper()
             if param == "B":
               param = "(bc),a"
             elif param == "D":
               param = "(de),a"
-          elif mnem == "LXI":
-            mnem = "ld"
-            reg = param[0].upper()
-            if reg == "B":
-              reg = "bc"
-            elif reg == "D":
-              reg = "de"
-            elif reg == "H":
-              reg = "hl"
-            param = reg + param[1:]
-            if param[2] == ',' and param[3] == '(' and param[-1] == ')':
-              param = param[:3] + param[4:-1]
-            if len(param) == 7 and param[2] == ',' \
-                  and param[3] == '\'' and param[6] == '\'':
-              param = param[:4] + param[5] + param[4] + param[6:]
-          elif mnem == "DAD":
-            mnem = "add"
-            reg = param[0].upper()
-            if reg == "B":
-              reg = "bc"
-            elif reg == "D":
-              reg = "de"
-            elif reg == "H":
-              reg = "hl"
-            param = "hl," + reg + param[1:]
-          elif mnem == "SHLD":
-            mnem = "ld"
+          elif omnem == "SHLD":
             param = "(" + param + "),hl"
-          elif mnem == "LHLD":
-            mnem = "ld"
+          elif omnem == "LHLD":
             param = "hl,(" + param + ")"
-          elif mnem == "SPHL":
-            mnem = "ld"
+          elif omnem == "SPHL":
             param = "sp,hl"
-          elif mnem == "ORA":
-            mnem = "or"
-            param = fixRegisters(param)
-          elif mnem == "ORI":
-            mnem = "or"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-          elif mnem == "ANA":
-            mnem = "and"
-            param = fixRegisters(param)
-          elif mnem == "ANI":
-            mnem = "and"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-          elif mnem == "XRA":
-            mnem = "xor"
-            param = fixRegisters(param)
-          elif mnem == "XRI":
-            mnem = "xor"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-          elif mnem == "CMP":
-            mnem = "cp"
-            param = fixRegisters(param)
-          elif mnem == "CPI":
-            mnem = "cp"
-            if re.match("^\(.+\)$", param):
-              param = param[1:-1]
-          elif mnem == "PUSH" or mnem == "POP":
+          elif omnem == "PUSH" or omnem == "POP":
             reg = param.upper()
             if reg == "B":
               param = "bc"
@@ -452,88 +352,50 @@ def convertSyntax(filename):
               param = "hl"
             elif reg == "PSW":
               param = "af"
-          elif mnem == "LDA":
-            mnem = "ld"
+          elif omnem == "LDA" or omnem == "IN":
             param = "a,(" + param + ")"
-          elif mnem == "LDAX":
-            mnem = "ld"
+          elif omnem == "LDAX":
             reg = param.upper()
             if reg == "B":
               param = "a,(bc)"
             elif reg == "D":
               param = "a,(de)"
-          elif mnem == "RNZ":
-            mnem = "ret"
+          elif omnem == "RNZ":
             param = "nz"
-          elif mnem == "RZ":
-            mnem = "ret"
+          elif omnem == "RZ":
             param = "z"
-          elif mnem == "RNC":
-            mnem = "ret"
+          elif omnem == "RNC":
             param = "nc"
-          elif mnem == "RC":
-            mnem = "ret"
+          elif omnem == "RC":
             param = "c"
-          elif mnem == "RPO":
-            mnem = "ret"
+          elif omnem == "RPO":
             param = "po"
-          elif mnem == "RPE":
-            mnem = "ret"
+          elif omnem == "RPE":
             param = "pe"
-          elif mnem == "RP":
-            mnem = "ret"
+          elif omnem == "RP":
             param = "p"
-          elif mnem == "RM":
-            mnem = "ret"
+          elif omnem == "RM":
             param = "m"
-          elif mnem == "CNZ":
-            mnem = "call"
+          elif omnem == "CNZ":
             param = "nz," + param
-          elif mnem == "CZ":
-            mnem = "call"
+          elif omnem == "CZ":
             param = "z," + param
-          elif mnem == "CNC":
-            mnem = "call"
+          elif omnem == "CNC":
             param = "nc," + param
-          elif mnem == "CC":
-            mnem = "call"
+          elif omnem == "CC":
             param = "c," + param
-          elif mnem == "CPO":
-            mnem = "call"
+          elif omnem == "CPO":
             param = "po," + param
-          elif mnem == "CPE":
-            mnem = "call"
+          elif omnem == "CPE":
             param = "pe," + param
-          elif mnem == "CP":
-            mnem = "call"
+          elif omnem == "CP":
             param = "p," + param
-          elif mnem == "CM":
-            mnem = "call"
+          elif omnem == "CM":
             param = "m," + param
-          elif mnem == "XCHG":
-            mnem = "ex"
+          elif omnem == "XCHG":
             param = "de,hl"
-          elif mnem == "XTHL":
-            mnem = "ex"
+          elif omnem == "XTHL":
             param = "(sp),hl"
-          elif mnem == "CMA":
-            mnem = "cpl"
-          elif mnem == "STC":
-            mnem = "scf"
-          elif mnem == "CMC":
-            mnem = "ccf"
-          elif mnem == "RLC":
-            mnem = "rlca"
-          elif mnem == "RRC":
-            mnem = "rrca"
-          elif mnem == "RAL":
-            mnem = "rla"
-          elif mnem == "RAR":
-            mnem = "rra"
-          elif mnem == "IN":
-            param = "a,(" + param + ")"
-          elif mnem == "OUT":
-            param = "(" + param + "),a"
 
         param = fixStrings(param)
         # m = re.search("'.*\\\\.*'", param)
@@ -578,13 +440,17 @@ def convertSyntax(filename):
   
   return outfile
 
-INSTRREGEX = INSTR8080[0]
-for instr in INSTR8080[1:]:
-  INSTRREGEX += "|" + instr
+INSTRREGEX = ""
+for instr in INSTR8080:
+  if len(INSTRREGEX):
+    INSTRREGEX += "|"
+  INSTRREGEX += instr
 if args.tasm:
-  TASMREGEX = "\\." + TASM[0]
-  for instr in TASM[1:]:
-    TASMREGEX += "|\\." + instr
+  TASMREGEX = ""
+  for instr in TASM:
+    if len(TASMREGEX):
+      TASMREGEX += "|"
+    TASMREGEX += instr
   
 if not os.path.exists(args.filename):
   print args.filename + " does not exist"
