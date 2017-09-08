@@ -23,7 +23,7 @@ import sys
 import tempfile
 import shutil
 
-ASSEMBLER = "asl -L -cpu "
+ASSEMBLER = "asl -u -L -cpu "
 P2HEX = "p2hex -F Intel"
 PLIST = "plist"
 INSTR8080 = {"ACI":"adc", "ADC":None, "ADD":None, "ADI":"add", "ANA":"and", "ANI":"and",
@@ -41,7 +41,7 @@ INSTR8080 = {"ACI":"adc", "ADC":None, "ADD":None, "ADI":"add", "ANA":"and", "ANI
              "SUI":"sub", "XCHG":"ex", "XRA":"xor", "XRI":"xor", "XTHL":"ex",
              # Directives that also need cleaning
              "DB":None, "DW":None}
-TASM = {".EQU":"equ", ".CSEG":";.cseg", ".DSEG":";.dseg", ".ORG":"org", ".TEXT":"db",
+TASM = {".EQU":"equ", ".CSEG":"segment code", ".DSEG":";segment data", ".ORG":"org", ".TEXT":"db",
         ".DB":"db", ".DW":"dw", ".BLOCK":"ds", ".END":"end"}
 INSTRREGEX = ""
 
@@ -52,6 +52,7 @@ parser.add_argument("filename", help="file to assemble")
 parser.add_argument("--output", help="file to output")
 parser.add_argument("--cpu", default="z80", help="CPU type: 8080 or Z80 (default)")
 parser.add_argument("--listing", action="store_true", help="Produce assembler listing in .lst")
+parser.add_argument("--prog", action="store_true", help="Keep intermediary .p file")
 parser.add_argument("--tasm", action="store_true", help="Use TASM compatible mnemonics")
 args = parser.parse_args()
 
@@ -271,7 +272,7 @@ def convertSyntax(filename):
         new = None
         if args.tasm and mnem in TASM:
           new = TASM[mnem]
-        elif mnem in INSTR8080:
+        elif args.cpu != "8080" and mnem in INSTR8080:
           new = INSTR8080[mnem]
         if new:
           mnem = new
@@ -440,6 +441,11 @@ def convertSyntax(filename):
   
   return outfile
 
+def keepFile(path, ext, info):
+  if os.path.exists(path + ext):
+    print info
+    shutil.copy2(path + ext, opath + ext)
+    
 INSTRREGEX = ""
 for instr in INSTR8080:
   if len(INSTRREGEX):
@@ -461,7 +467,7 @@ else:
   cmd = ASSEMBLER + args.cpu + " " + outfile
   print cmd
   result = os.system(cmd)
-  if (result & 0xff):
+  if (result & 0xff == 0):
     result = result >> 8
   
   path, ext = os.path.splitext(outfile)
@@ -472,9 +478,10 @@ else:
     print cmd
     os.system(cmd)
 
-  if args.listing and os.path.exists(path + ".lst"):
-    print "Copying listing output"
-    shutil.copy2(path + ".lst", opath + ".lst")
+  if args.prog:
+    keepFile(path, ".p", "Copying P output")
+  if args.listing:
+    keepFile(path, ".lst", "Copying listing output")
       
   shutil.rmtree(tmpdir)
   sys.exit(result)
