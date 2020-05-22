@@ -1,0 +1,25 @@
+From 7bfcf4b61543e106f706120245a042d27b87d676 Mon Sep 17 00:00:00 2001
+From: Chris Osborn <fozztexx@fozztexx.com>
+Date: Sat, 11 Jun 2016 21:50:11 -0700
+Subject: [PATCH] Don't complain about missing ENDIFs after processing END.
+
+---
+ as.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/as.c b/as.c
+index 0a8273e..6edaea8 100644
+--- a/as.c
++++ b/as.c
+@@ -2577,7 +2577,7 @@ BEGIN
+    ClearLocStack();
+    ClearStacks();
+    TossRegDefs(-1);
+-   if (FirstIfSave!=Nil) WrError(1470);
++   if (FirstIfSave!=Nil && !ENDOccured) WrError(1470);
+    if (FirstSaveState!=Nil) WrError(1460);
+    if (SectionStack!=Nil) WrError(1485);
+    if (StructStack!=Nil) WrXError(1551,StructStack->Name);
+-- 
+2.1.4
+
