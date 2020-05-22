@@ -18,6 +18,9 @@ stop erroring out when encountering an END inside of an IF/ENDIF. Once
 I did that the output was identical to what I get from LASM running on
 CP/M.
 
+The version of asl I'm using is at https://github.com/begoon/asl.git
+and you can find the patch in 0001-asl-end.patch
+
 http://www.insentricity.com/a.cl/259
 
 Chris Osborn <fozztexx@fozztexx.com>
